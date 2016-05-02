@@ -1,0 +1,16 @@
+
+%{
+#include <stdio.h>
+%}
+
+machine Scanner {
+
+    pre_code {{
+        index = 0;
+        memset(buffer, 0, sizeof(buffer));
+        buffer[index++] = '%';
+        buffer[index++] = '{';
+    }};     //pre_code init_copy;
+    //post_code end_scanner;
+
+};

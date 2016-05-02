@@ -1,0 +1,99 @@
+machine Scanner {
+    // define the states that will be used in the machine
+    // The START state is defined by the system and a definition
+    // in the state machine is required.
+    states  SPECIAL,    // copying a special token, such as := or >>=
+            HAVEPERCENT,// possible transition to copying a block
+            HAVESLASH,  // possible transition to ignoring a quote
+            HAVEOCURLY; // possible inline block
+    // The ERROR and the END states are defined by the system and are
+    // required to leave the state machine.  When the state machine ends
+    // with an END, the driver returns zero when it ends with an ERROR, the
+    // driver returns with -1.
+
+    // define the transitions used in the machine
+    trans   INVALID,    // an invalid character
+            WHITE,      // spaces tabs and line endings
+            ALPNUM,     // alphanumeric characters
+            NEWLINE,    // used to end a single line comment
+            PUNCT,      // characters such as #,$, and @
+            SQCHAR,     // the \' char
+            DQCHAR,     // the \" char
+            PERCENT,    // the % char
+            SLASH,      // the / char
+            STAR,       // the * char
+            OCURLY,     // the { char
+            CCURLY,     // the } char
+            END_FILE;   // the EOF char
+    // The DEFAULT transition is defined by the system and is used the same
+    // as the default clause in a C switch/case statement.  Any transition
+    // that has been defined is accepted.  A transition that is not defined
+    // is not accepted and produces a system error.
+
+    // Input function reads characters from the input and converts them
+    // into the transitions required by the state machine.
+    input read_trans;
+    // optional init and end functions
+    pre_code init_copy;
+    //post_code end_scanner;
+
+    state START {
+        INVALID: ERROR invalid_char;
+        // note that this rule is bogus and designed to test the scanner
+        WHITE | NEWLINE: START {{
+            int ploo =0, blart = 1;
+            while(blart) {
+                nop();
+                if(ploo) {
+                    printf("a floop of blart");
+                }
+            }
+        }};
+        ALPNUM: END Word;
+        PUNCT | STAR: SPECIAL copy_char;
+        SQCHAR: END Squote;
+        DQCHAR: END Dquote;
+        PERCENT: HAVEPERCENT copy_char;
+        SLASH: HAVESLASH copy_char;
+        OCURLY: HAVEOCURLY copy_char;
+        CCURLY: SPECIAL copy_char;
+        END_FILE: END nop;
+    };
+
+    state SPECIAL {
+        INVALID: ERROR invalid_char;
+        WHITE | END_FILE: END nop;
+        PERCENT | PUNCT | STAR: SPECIAL copy_char;
+        DEFAULT: END pushback;
+    };
+
+    state HAVEPERCENT {
+        INVALID: ERROR invalid_char;
+        END_FILE | WHITE: END nop;
+        DEFAULT: END pushback;
+        PUNCT | PERCENT | STAR: SPECIAL copy_char;
+        OCURLY: END RawBlock;
+        CCURLY: ERROR unexpected_ccurly;
+    };
+
+    state HAVESLASH {
+        INVALID: ERROR invalid_char;
+        END_FILE | WHITE: END nop;
+        PERCENT | PUNCT: SPECIAL copy_char;
+        STAR: START Mline;
+        SLASH: START Sline;
+        DEFAULT: END pushback;
+    };
+
+    state HAVEOCURLY {
+        INVALID: ERROR invalid_char;
+        END_FILE | WHITE: END nop;
+        DEFAULT: END pushback;
+        OCURLY: END InlineBlock;
+    };
+
+    // The error and the end states are implemented internally.  Supplying
+    // a state definition called END or one called ERROR is a syntax error.
+
+};
+

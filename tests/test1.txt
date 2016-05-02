@@ -1,0 +1,47 @@
+// 123 123 123 123 123
+%{
+
+this is a bunch of arb test.
+123
+546
+/* a comment */
+// another comment
+
+%}
+"blart the bear"
+asdf (sdfasdf asdfafds asdfasdf);
+// 123 123 123 123 123
+asdf (
+asdf : asdf | { some 'stupic text' } sdfsdf;
+);
+/blart*  %%%%
+%blert&  /----0/----0/----/----
+"but not really"; :|=
+
+  machine SM_macine0 {
+    states one, two, three;
+    trans alpha, beta, chiro;
+
+    state one {
+        alpha: two { this is some code };
+    }
+  }
+/*
+qqewe
+qwe
+
+weq
+weq
+
+qweqwe
+qweqw
+  asdf ();
+*/
+
+%{
+bla bla
+/* blart blart blart */
+
+weqr qwerwqer qwerr
+
+%}

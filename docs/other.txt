@@ -1,0 +1,46 @@
+
+--------------
+Other stuff
+--------------
+
+When creating a scanner that scans for words, train a state table.
+1.  start with a blank table that has all errors in it.
+2.  when a character is read from a word, then create a new state for it.
+3.  follow through the word until the word is empty and have that the
+    return state.
+
+For example, given the word list:
+asd
+asdr
+bsd
+blart
+
+The letter 'a' is read and a state is created for that called "a".  Then the
+letter 's' is read and a state "as" is created and stored.  The the letter 'd'
+is read and the state "asd" is created.  When the end-of-line is read, then
+the end state is ensantiated for state "asd" at that transition.
+
+For the next word, the same states apply except that the transition for 'r' is
+different from the end state and the end state is enstantiated for the state
+"asdr".
+
+The state table is arranged in an N x 256 format where N is the number of
+states, total.  The 256 is the maximum number of characters that are possible.
+This could be reduced by only allowing printable characters, for example.  The
+actual implentation would have to calcualte the actual index by multiplying
+the row and column together.  Only a 1D array can grow or shrink.  Most of the
+entries in the array are error entries.  It should be possible to reuse array
+entries that are not being otherwise used.  The complete set of states must
+be identified and then the locations that are not used can be stolen to
+compress the state array.
+
+
+
+---------
+
+Machine learning: states that are entered with no handler are considered "bad"
+and so there is a handler picked (more or less) at random to handle the state.
+For learning, every state machine path is recorded and if the machine is
+"punished" then one of the states is changed at randon and the string is
+replayed with the new state path.  If it winds up having at least one new
+location then it is considered "good" and so is remembered.  (THIS IS BULLSHIT)

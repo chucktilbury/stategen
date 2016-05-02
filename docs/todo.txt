@@ -1,0 +1,21 @@
+
+The main todo is to create a validation layer between the code that reads and
+stores the input and the part of the code that outputs the data.  Ideally, the
+validation layer will remove all of the assumptions about whether the input was
+correct and tag all errors before the emit functions ever start.
+
+The validation layer should catch all errors that will result in an error when
+the output is compiled.
+
+Examples of things that the validation layer should do:
+1.  Verify that there are no name collisions between states and transition
+    names. This is not a bad error of its self, but it probably indicates an
+    error in the definition.
+
+2.  Verify that all of the state names that are defined with the states keyword
+    are actually represented by a state definition.
+
+3.  Verify that all of the state definitions are actually declaired in the
+    states definition.  This is an error that is caught by the compiler.
+
+There are lots more things that this layer should do.

@@ -1,0 +1,783 @@
+
+/*
+ *  Parser state machine.  The state machine reads the state machine definition
+ *  and stores it as data strucutres.  The main state machine reads the entire
+ *  input file, including includes and outputs the data structure.
+ */
+
+%{
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <ctype.h>
+
+#include "parse.h"
+#include "tokens.h"
+#include "files.h"
+#include "errors.h"
+#include "validate.h"
+#include "scanner.h"
+
+/* FYI: List of transitions
+enum {
+    PIPE_SYMBOL,
+    OCURLY_SYMBOL,
+    CCURLY_SYMBOL,
+    CCURSEMI_SYMBOL,
+    COMMA_SYMBOL,
+    SEMI_SYMBOL,
+    COLON_SYMBOL,
+    INCLUDE_SYMBOL,
+    MACHINE_SYMBOL,
+    INPUT_SYMBOL,
+    STATES_SYMBOL,
+    TRANS_SYMBOL,
+    STATE_SYMBOL,
+    PRECODE_SYMBOL,
+    POSTCODE_SYMBOL,
+    QSTRG_SYMBOL,
+    UNKNOWN_SYMBOL,
+    FILE_END_SYMBOL,
+    RAW_BLOCK,
+    INLINE_BLOCK,
+};
+*/
+
+struct token {
+    char strg[1024*32];
+    int type;
+} token;
+
+// these are used to construct the data strucutre as the parse evolves
+static definition_t *def;
+static state_def_t *sta;
+static machine_t *mac;
+static transition_t *tran;
+
+int read_token(void) {
+
+    token_t *tok = get_token();
+    strncpy(token.strg, tok->strg, sizeof(token.strg));
+    token.type = tok->type;
+    free_token(tok);
+    return token.type;
+}
+
+static char *save_inline(char *str) {
+
+    static int num = 100;
+    char buffer[25];
+    inline_list_t *inl = ALLOC(inline_list_t);
+
+    snprintf(buffer, sizeof(buffer), "_inline_%04X", num);
+    inl->name = STRDUP(buffer);
+    inl->body = STRDUP(str);
+    if(def->inline_list != NULL)
+        inl->next = def->inline_list;
+    def->inline_list = inl;
+    return inl->name;
+}
+
+static int nop(void) {
+    // simple as simple gets
+    return 0;
+}
+
+static int unexpected_token(void) {
+    SERROR(SYNTAX_ERROR, "Unexpected \"%s\" token encountered", token.strg);
+    return 0;
+}
+
+%}
+
+machine Parse {
+
+    input read_token;
+    pre_code {{ def = ALLOC(definition_t); }};
+    post_code {{ validate(def); }};
+
+    trans INLINE_BLOCK,
+        RAW_BLOCK,
+        FILE_END_SYMBOL,
+        UNKNOWN_SYMBOL,
+        QSTRG_SYMBOL,
+        POSTCODE_SYMBOL,
+        PRECODE_SYMBOL,
+        STATE_SYMBOL,
+        TRANS_SYMBOL,
+        STATES_SYMBOL,
+        INPUT_SYMBOL,
+        MACHINE_SYMBOL,
+        INCLUDE_SYMBOL,
+        COLON_SYMBOL,
+        SEMI_SYMBOL,
+        COMMA_SYMBOL,
+        CCURSEMI_SYMBOL,
+        CCURLY_SYMBOL,
+        OCURLY_SYMBOL,
+        PIPE_SYMBOL;
+
+    state START {
+        MACHINE_SYMBOL: START Machine;
+        INCLUDE_SYMBOL: START Include;
+        FILE_END_SYMBOL: END nop;
+        DEFAULT: ERROR unexpected_token;
+    };
+};
+
+machine Machine {
+
+    input read_token;
+    pre_code {{
+        mac = ALLOC(machine_t);
+    }};
+    post_code {{
+        if(def->machine_list != NULL)
+            mac->next = def->machine_list;
+        def->machine_list = mac;
+    }};
+
+    states INTRO, BODY;
+
+    trans INLINE_BLOCK,
+        RAW_BLOCK,
+        FILE_END_SYMBOL,
+        UNKNOWN_SYMBOL,
+        QSTRG_SYMBOL,
+        POSTCODE_SYMBOL,
+        PRECODE_SYMBOL,
+        STATE_SYMBOL,
+        TRANS_SYMBOL,
+        STATES_SYMBOL,
+        INPUT_SYMBOL,
+        MACHINE_SYMBOL,
+        INCLUDE_SYMBOL,
+        COLON_SYMBOL,
+        SEMI_SYMBOL,
+        COMMA_SYMBOL,
+        CCURSEMI_SYMBOL,
+        CCURLY_SYMBOL,
+        OCURLY_SYMBOL,
+        PIPE_SYMBOL;
+
+    state START {
+        // save the machine name
+        UNKNOWN_SYMBOL: INTRO {{
+            mac->name = STRDUP(token.strg);
+        }};
+        DEFAULT: ERROR unexpected_token;
+    };
+
+    state INTRO {
+        // eat the "{"
+        OCURLY_SYMBOL: BODY nop;
+        DEFAULT: ERROR unexpected_token;
+    };
+
+    state BODY {
+        INPUT_SYMBOL: START Input;
+        STATES_SYMBOL: START StateList;
+        STATE_SYMBOL: START State;
+        TRANS_SYMBOL: START TransList;
+        PRECODE_SYMBOL: START PreCode;
+        POSTCODE_SYMBOL: START PostCode;
+        CCURSEMI_SYMBOL: END nop;
+        DEFAULT: ERROR unexpected_token;
+    };
+};
+
+machine Input {
+
+    input read_token;
+    states HAVENAME;
+    trans INLINE_BLOCK,
+        RAW_BLOCK,
+        FILE_END_SYMBOL,
+        UNKNOWN_SYMBOL,
+        QSTRG_SYMBOL,
+        POSTCODE_SYMBOL,
+        PRECODE_SYMBOL,
+        STATE_SYMBOL,
+        TRANS_SYMBOL,
+        STATES_SYMBOL,
+        INPUT_SYMBOL,
+        MACHINE_SYMBOL,
+        INCLUDE_SYMBOL,
+        COLON_SYMBOL,
+        SEMI_SYMBOL,
+        COMMA_SYMBOL,
+        CCURSEMI_SYMBOL,
+        CCURLY_SYMBOL,
+        OCURLY_SYMBOL,
+        PIPE_SYMBOL;
+
+    state START{
+        // save the input name
+        UNKNOWN_SYMBOL: HAVENAME {{
+            if(mac->input != NULL)
+                SERROR(SYNTAX_ERROR, "Only one \"input\" directive is allowed per machine");
+            else
+                mac->input = STRDUP(token.strg);
+        }};
+        // the input is an inline block
+        INLINE_BLOCK: HAVENAME {{
+            if(mac->input != NULL)
+                SERROR(SYNTAX_ERROR, "Only one \"input\" directive is allowed per machine");
+            else {
+                char *name = save_inline(token.strg);
+                mac->input = STRDUP(name);
+            }
+        }};
+        DEFAULT: ERROR unexpected_token;
+    };
+
+    state HAVENAME {
+        SEMI_SYMBOL: END nop;
+        DEFAULT: ERROR unexpected_token;
+    };
+};
+
+machine StateList {
+
+    input read_token;
+    states HAVENAME;
+    trans INLINE_BLOCK,
+        RAW_BLOCK,
+        FILE_END_SYMBOL,
+        UNKNOWN_SYMBOL,
+        QSTRG_SYMBOL,
+        POSTCODE_SYMBOL,
+        PRECODE_SYMBOL,
+        STATE_SYMBOL,
+        TRANS_SYMBOL,
+        STATES_SYMBOL,
+        INPUT_SYMBOL,
+        MACHINE_SYMBOL,
+        INCLUDE_SYMBOL,
+        COLON_SYMBOL,
+        SEMI_SYMBOL,
+        COMMA_SYMBOL,
+        CCURSEMI_SYMBOL,
+        CCURLY_SYMBOL,
+        OCURLY_SYMBOL,
+        PIPE_SYMBOL;
+
+    state START {
+        // save the name
+        UNKNOWN_SYMBOL: HAVENAME {{
+            string_list_t *lst = ALLOC(string_list_t);
+            lst->strg = STRDUP(token.strg);
+            if(mac->states != NULL)
+                lst->next = mac->states;
+            mac->states = lst;
+        }};
+        DEFAULT: ERROR unexpected_token;
+    };
+
+    state HAVENAME {
+        // if there is another name, then go back and get it
+        COMMA_SYMBOL: START nop;
+        // else done with the list
+        SEMI_SYMBOL: END nop;
+        DEFAULT: ERROR unexpected_token;
+    };
+};
+
+machine State {
+
+    input read_token;
+    states INTRO, BODY, TRANSLIST, GETNAME, GETCODE, GETSTATE, GETTAIL;
+    // create the current state
+    pre_code {{
+        sta = ALLOC(state_list_t);
+    }};
+    // link the state into the list and get ready for the next one
+    post_code {{
+        if(mac->list != NULL)
+            sta->next = mac->list;
+        mac->list = sta;
+    }};
+
+    trans INLINE_BLOCK,
+        RAW_BLOCK,
+        FILE_END_SYMBOL,
+        UNKNOWN_SYMBOL,
+        QSTRG_SYMBOL,
+        POSTCODE_SYMBOL,
+        PRECODE_SYMBOL,
+        STATE_SYMBOL,
+        TRANS_SYMBOL,
+        STATES_SYMBOL,
+        INPUT_SYMBOL,
+        MACHINE_SYMBOL,
+        INCLUDE_SYMBOL,
+        COLON_SYMBOL,
+        SEMI_SYMBOL,
+        COMMA_SYMBOL,
+        CCURSEMI_SYMBOL,
+        CCURLY_SYMBOL,
+        OCURLY_SYMBOL,
+        PIPE_SYMBOL;
+
+    state START {
+        // save the name of the state
+        UNKNOWN_SYMBOL: INTRO {{
+            sta->name = STRDUP(token.strg);
+        }};
+        DEFAULT: ERROR unexpected_token;
+    };
+
+    state INTRO {
+        // eat the "{"
+        OCURLY_SYMBOL: BODY nop;
+        DEFAULT: ERROR unexpected_token;
+    };
+
+    state BODY {
+        // read a transition spec
+        UNKNOWN_SYMBOL: TRANSLIST {{
+            tran = ALLOC(transition_t);
+            tran->list = ALLOC(string_list_t);
+            tran->list->strg = STRDUP(token.strg);
+        }};
+        // quit the loop
+        CCURSEMI_SYMBOL: END nop;
+        DEFAULT: ERROR unexpected_token;
+    };
+
+    state GETNAME {
+        // save a name into the trans list
+        UNKNOWN_SYMBOL: TRANSLIST {{
+            string_list_t *lst = ALLOC(string_list_t);
+            lst->strg = STRDUP(token.strg);
+            lst->next = tran->list;
+            tran->list = lst;
+        }};
+        DEFAULT: ERROR unexpected_token;
+    };
+
+    state TRANSLIST {
+        // get another name from the trans list
+        PIPE_SYMBOL: GETNAME nop;
+        // move on to the state
+        COLON_SYMBOL: GETSTATE nop;
+        DEFAULT: ERROR unexpected_token;
+    };
+
+    state GETSTATE {
+        // save the state spec
+        UNKNOWN_SYMBOL: GETCODE {{
+            tran->state = STRDUP(token.strg);
+        }};
+        DEFAULT: ERROR unexpected_token;
+    };
+
+    state GETCODE {
+        // code is a name
+        UNKNOWN_SYMBOL: GETTAIL {{
+            tran->func = STRDUP(token.strg);
+        }};
+        // code is inline
+        INLINE_BLOCK: GETTAIL {{
+            char *name = save_inline(token.strg);
+            tran->func = STRDUP(name);
+        }} ;
+        DEFAULT: ERROR unexpected_token;
+    };
+
+    state GETTAIL {
+        // eat the ";"
+        SEMI_SYMBOL: BODY {{
+            if(sta->list != NULL)
+                tran->next = sta->list;
+            sta->list = tran;
+        }};
+        DEFAULT: ERROR unexpected_token;
+    };
+};
+
+machine TransList {
+
+    input read_token;
+    states HAVENAME;
+    trans INLINE_BLOCK,
+        RAW_BLOCK,
+        FILE_END_SYMBOL,
+        UNKNOWN_SYMBOL,
+        QSTRG_SYMBOL,
+        POSTCODE_SYMBOL,
+        PRECODE_SYMBOL,
+        STATE_SYMBOL,
+        TRANS_SYMBOL,
+        STATES_SYMBOL,
+        INPUT_SYMBOL,
+        MACHINE_SYMBOL,
+        INCLUDE_SYMBOL,
+        COLON_SYMBOL,
+        SEMI_SYMBOL,
+        COMMA_SYMBOL,
+        CCURSEMI_SYMBOL,
+        CCURLY_SYMBOL,
+        OCURLY_SYMBOL,
+        PIPE_SYMBOL;
+
+    state START {
+        // save a name to the transition list
+        UNKNOWN_SYMBOL: HAVENAME {{
+            string_list_t *lst = ALLOC(string_list_t);
+            lst->strg = STRDUP(token.strg);
+            if(mac->trans != NULL)
+                lst->next = mac->trans;
+            mac->trans = lst;
+        }};
+        DEFAULT: ERROR unexpected_token;
+    };
+
+    state HAVENAME {
+        // loop back to get another name
+        COMMA_SYMBOL: START nop;
+        // else stop and return
+        SEMI_SYMBOL: END nop;
+        DEFAULT: ERROR unexpected_token;
+    };
+};
+
+machine PreCode {
+
+    input read_token;
+    states HAVENAME;
+    trans INLINE_BLOCK,
+        RAW_BLOCK,
+        FILE_END_SYMBOL,
+        UNKNOWN_SYMBOL,
+        QSTRG_SYMBOL,
+        POSTCODE_SYMBOL,
+        PRECODE_SYMBOL,
+        STATE_SYMBOL,
+        TRANS_SYMBOL,
+        STATES_SYMBOL,
+        INPUT_SYMBOL,
+        MACHINE_SYMBOL,
+        INCLUDE_SYMBOL,
+        COLON_SYMBOL,
+        SEMI_SYMBOL,
+        COMMA_SYMBOL,
+        CCURSEMI_SYMBOL,
+        CCURLY_SYMBOL,
+        OCURLY_SYMBOL,
+        PIPE_SYMBOL;
+
+    state START{
+        // code is a name
+        UNKNOWN_SYMBOL: HAVENAME {{
+            if(mac->precode != NULL)
+                SERROR(SYNTAX_ERROR, "Only one \"precode\" directive is allowed per machine");
+            else
+                mac->precode = STRDUP(token.strg);
+        }};
+        // code is inline
+        INLINE_BLOCK: HAVENAME {{
+            if(mac->precode != NULL)
+                SERROR(SYNTAX_ERROR, "Only one \"precode\" directive is allowed per machine");
+            else {
+                char *name = save_inline(token.strg);
+                mac->precode = STRDUP(name);
+            }
+        }};
+        DEFAULT: ERROR unexpected_token;
+    };
+
+    state HAVENAME {
+        // eat the ";"
+        SEMI_SYMBOL: END nop;
+        DEFAULT: ERROR unexpected_token;
+    };
+};
+
+machine PostCode {
+
+    input read_token;
+    states HAVENAME;
+    trans INLINE_BLOCK,
+        RAW_BLOCK,
+        FILE_END_SYMBOL,
+        UNKNOWN_SYMBOL,
+        QSTRG_SYMBOL,
+        POSTCODE_SYMBOL,
+        PRECODE_SYMBOL,
+        STATE_SYMBOL,
+        TRANS_SYMBOL,
+        STATES_SYMBOL,
+        INPUT_SYMBOL,
+        MACHINE_SYMBOL,
+        INCLUDE_SYMBOL,
+        COLON_SYMBOL,
+        SEMI_SYMBOL,
+        COMMA_SYMBOL,
+        CCURSEMI_SYMBOL,
+        CCURLY_SYMBOL,
+        OCURLY_SYMBOL,
+        PIPE_SYMBOL;
+
+    state START{
+        // code is a name
+        UNKNOWN_SYMBOL: HAVENAME {{
+            if(mac->postcode != NULL)
+                SERROR(SYNTAX_ERROR, "Only one \"postcode\" directive is allowed per machine");
+            else
+                mac->postcode = STRDUP(token.strg);
+        }};
+        // code is inline
+        INLINE_BLOCK: HAVENAME {{
+            if(mac->postcode != NULL)
+                SERROR(SYNTAX_ERROR, "Only one \"postcode\" directive is allowed per machine");
+            else {
+                char *name = save_inline(token.strg);
+                mac->postcode = STRDUP(name);
+            }
+        }};
+        DEFAULT: ERROR unexpected_token;
+    };
+
+    state HAVENAME {
+        // eat the ";"
+        SEMI_SYMBOL: END nop;
+        DEFAULT: ERROR unexpected_token;
+    };
+};
+
+machine Include {
+
+    input read_token;
+    trans INLINE_BLOCK,
+        RAW_BLOCK,
+        FILE_END_SYMBOL,
+        UNKNOWN_SYMBOL,
+        QSTRG_SYMBOL,
+        POSTCODE_SYMBOL,
+        PRECODE_SYMBOL,
+        STATE_SYMBOL,
+        TRANS_SYMBOL,
+        STATES_SYMBOL,
+        INPUT_SYMBOL,
+        MACHINE_SYMBOL,
+        INCLUDE_SYMBOL,
+        COLON_SYMBOL,
+        SEMI_SYMBOL,
+        COMMA_SYMBOL,
+        CCURSEMI_SYMBOL,
+        CCURLY_SYMBOL,
+        OCURLY_SYMBOL,
+        PIPE_SYMBOL;
+
+    state START {
+        QSTRG_SYMBOL: END {{
+            files_open(token.strg);
+        }};
+        DEFAULT: ERROR unexpected_token;
+    };
+};
+
+%{
+
+static void free_string_list(string_list_t *list) {
+
+    string_list_t *sl, *next;
+
+    for(sl = list; sl != NULL; sl = next) {
+        next = sl->next;
+        if(NULL != sl->strg)
+            free(sl->strg);
+        free(sl);
+    }
+}
+
+static void free_trans_list(transition_t *list) {
+
+    transition_t *tl, *next;
+
+    for(tl = list; tl != NULL; tl = next) {
+        next = tl->next;
+        if(NULL != tl->state)
+            free(tl->state);
+        if(NULL != tl->func)
+            free(tl->func);
+        free_string_list(tl->list);
+        free(tl);
+    }
+}
+
+static void free_state_list(state_def_t *state_def) {
+
+    state_def_t *sd, *next;
+
+    for(sd = state_def; sd != NULL; sd = next) {
+        next = sd->next;
+        if(NULL != sd->name)
+            free(sd->name);
+        free_trans_list(sd->list);
+        free(sd);
+    }
+}
+
+static void free_machine_list(machine_t *machine) {
+
+    machine_t *mac, *next;
+
+    for(mac = machine; mac != NULL; mac = next) {
+        next = mac->next;
+        if(NULL != mac->name)
+            free(mac->name);
+        if(NULL != mac->precode)
+            free(mac->precode);
+        if(NULL != mac->postcode)
+            free(mac->postcode);
+        if(NULL != mac->trans)
+            free_string_list(mac->trans);
+        if(NULL != mac->states)
+            free_string_list(mac->states);
+        if(NULL != mac->list)
+            free_state_list(mac->list);
+        free(mac);
+    }
+}
+
+/*
+ *  External user interface.
+ */
+void free_definition(definition_t *def) {
+
+    if(NULL != def) {
+        if(NULL != def->preamble)
+            free(def->preamble);
+        if(NULL != def->postamble)
+            free(def->postamble);
+        free_machine_list(def->machine_list);
+        free(def);
+    }
+}
+
+definition_t *get_definition(char *name) {
+
+    init_scanner();
+    files_open(name);
+
+    Parse();
+    return def;
+}
+
+/////////////////////////////////////////////////////////////////
+// unit tests
+
+#ifdef UNIT_TEST
+
+static void dump_list(string_list_t *list) {
+
+    string_list_t *l;
+
+    for(l = list; l != NULL; l = l->next)
+        printf("        %s\n", l->strg);
+}
+
+static void dump_trans(transition_t *trans) {
+
+    transition_t *tr;
+
+    for(tr = trans; tr != NULL; tr = tr->next) {
+        printf("    TRANS LIST:\n");
+        dump_list(tr->list);
+        if(tr->state != NULL)
+            printf("        STATE: %s\n", tr->state);
+        else
+            printf("        STATE: (none defined)\n");
+
+        if(tr->func != NULL)
+            printf("        FUNC: %s\n", tr->func);
+        else
+            printf("        FUNC: (none defined)\n");
+
+    }
+}
+
+static void dump_states(state_def_t *state_def) {
+
+    state_def_t *sd;
+
+    for(sd = state_def; sd != NULL; sd = sd->next) {
+        if(sd->name != NULL)
+            printf("    STATE NAME: %s\n", sd->name);
+        else
+            printf("    STATE NAME: (none defined)\n");
+
+        dump_trans(sd->list);
+    }
+}
+
+static void dump_mac(machine_t *mac) {
+
+    if(mac->name != NULL)
+        printf("MACHINE NAME: %s\n", mac->name);
+    else
+        printf("MACHINE NAME: (none defined)\n");
+    if(mac->input != NULL)
+        printf("    INPUT: %s\n", mac->input);
+    else
+        printf("    INPUT: (none defined)\n");
+    if(mac->precode != NULL)
+        printf("    PRECODE: %s\n", mac->precode);
+    else
+        printf("    PRECODE: (none defined)\n");
+    if(mac->postcode != NULL)
+        printf("    POSTCODE: %s\n", mac->postcode);
+    else
+        printf("    POSTCODE: (none defined)\n");
+    if(mac->states != NULL) {
+        printf("    STATES:\n");
+        dump_list(mac->states);
+    }
+    else
+        printf("    STATES:\n        NONE\n");
+    if(mac->trans != NULL) {
+        printf("    TRANSITIONS:\n");
+        dump_list(mac->trans);
+    }
+    else
+        printf("    TRANSITIONS:\n        NONE\n");
+    dump_states(mac->list);
+}
+
+static void dump_def(definition_t *def) {
+
+    machine_t *mac;
+
+    if(def->preamble != NULL)
+        printf("PREAMBLE\n%s\n", def->preamble);
+    else
+        printf("PREAMBLE (none)\n");
+
+    if(def->postamble != NULL)
+        printf("POSTAMBLE\n%s\n", def->postamble);
+    else
+        printf("POSTAMBLE (none)\n");
+
+    for(mac = def->machine_list; mac != NULL; mac = mac->next)
+        dump_mac(mac);
+}
+
+int main(void) {
+
+    definition_t *def;
+
+    def = get_definition("..\\sm\\scanner.sm");
+
+    dump_def(def);
+
+    free_definition(def);
+
+    return 0;
+}
+
+#endif
+
+
+%}

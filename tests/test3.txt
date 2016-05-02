@@ -1,0 +1,558 @@
+/*
+    This is a test file that defines a simple text scanner for the machine
+    definition language.
+*/
+
+%{
+// BEGINNING OF C SUPPORT ROUTINES
+
+/*
+ *  Generic scanner module.  This module breaks input up into groups of
+ *  characters.  It does not attempt to attach any meaning or value to them.
+ *
+ *  1.  Requires a list of "stop" characters, usually white space.  These are
+ *      actually single character token that are not returned by the scanner.
+ *      This includes the \n character, which is used to indicate the end of a
+ *      line.
+ *
+ *  2.  A list of characters that are part of a simple token that are special
+ *      somehow.  For example, the tokens "%{", "%}", "==", "!=", ">=", and
+ *      "<=" are composed of the string "%{}=!<>".  If the string "%=!" is
+ *      encountered in the input, then it will be returned.
+ *
+ *  3.  Requires a list of characters that can appear within words.  The term
+ *      "word" is in the most generic sense.  In this context a string that
+ *      represents a number is a word, too.
+ *
+ *  4.  A list of quote characters.  Normally, this will be "\"\'", but it
+ *      could be anything.  These are considered "stop" characters and are
+ *      treated as a string.  The quote character is returned with the string.
+ *
+ *  Any character that is encountered in the input that is not in one of these
+ *  4 lists is considered an error.
+ *
+ *  This scanner is hard wired to ignore C comments and to return everything
+ *  between a "%{" and a "%}" as a raw code block.
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <ctype.h>
+#include "files.h"
+
+// Globals used by the support routines to maintain state that is not part of
+// the state machine.
+static unsigned int char_table[256];
+static char buffer[1024*64];
+static int index;
+static int character;
+
+// arrays of characters that define different transitions for read_trans()
+static const char *stop = " \t\r\n";
+static const char *special = "~!@#$^()-=+|\\[]:;<>,.?&"; // "%/*{}"  &
+static const char *words = "0123456789_abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+// these are values that could be defined by read_trans().
+enum {
+    INVALID = 0,// an invalid character
+    WHITE,      // spaces tabs and line endings
+    ALPNUM,     // alphanumeric characters
+    NEWLINE,    // used to end a single line comment
+    PUNCT,      // characters such as #,$, and @
+    SQCHAR,     // the \' char
+    DQCHAR,     // the \" char
+    PERCENT,    // the % char
+    SLASH,      // the / char
+    STAR,       // the * char
+    OCURLY,     // the { char
+    CCURLY,     // the } char
+    END_FILE,   // the EOF char
+};
+
+static int read_trans(void) {
+
+    character = read_character();
+    return char_table[character];
+}
+
+static void nop(void) {
+    // its an easy one....
+}
+
+static void invalid_char(void) {
+    fprintf(stderr, "SCAN ERROR: invalid character '%c' encountered in \"%s\" on line %d\n",
+            character, file_name(), line_number());
+}
+
+static void unexpected_newline(void) {
+    fprintf(stderr, "SCAN ERROR: unexpected newline encountered in \"%s\" on line %d\n",
+            file_name(), line_number());
+}
+
+static void unexpected_eof(void) {
+    fprintf(stderr, "SCAN ERROR: unexpected end of file encountered in \"%s\" on line %d\n",
+            file_name(), line_number());
+}
+
+static void unexpected_ccurly(void) {
+    fprintf(stderr, "SCAN ERROR: unexpected \'}\' encountered in \"%s\" on line %d\n",
+            file_name(), line_number());
+}
+
+static void copy_char(void) {
+    buffer[index++] = character;
+}
+
+static void pushback(void) {
+    unread_character(character);
+}
+
+static void init_rawblock(void) {
+    index = 0;
+    memset(buffer, 0, sizeof(buffer));
+    buffer[index++] = '%';
+    buffer[index++] = '{';
+}
+
+static void init_copy(void) {
+    index = 0;
+    memset(buffer, 0, sizeof(buffer));
+    buffer[index++] = character;
+}
+
+static void init_block(void) {
+    buffer[index++] = character;
+}
+
+// END OF C SUPPORT ROUTINES
+
+///////////////////////////////////////////////
+// machine definitions will be inserted here.
+///////////////////////////////////////////////
+%}
+// BEGINNING OF MACHINE DEFINITION
+
+machine Scanner {
+    // define the states that will be used in the machine
+    // The START state is defined by the system and a definition
+    // in the state machine is required.
+    states  SPECIAL,    // copying a special token, such as := or >>=
+            HAVEPERCENT,// possible transition to copying a block
+            HAVESLASH,  // possible transition to ignoring a quote
+            HAVEOCURLY; // possible inline block
+    // The ERROR and the END states are defined by the system and are
+    // required to leave the state machine.  When the state machine ends
+    // with an END, the driver returns zero when it ends with an ERROR, the
+    // driver returns with -1.
+
+    // define the transitions used in the machine
+    trans   INVALID,    // an invalid character
+            WHITE,      // spaces tabs and line endings
+            ALPNUM,     // alphanumeric characters
+            NEWLINE,    // used to end a single line comment
+            PUNCT,      // characters such as #,$, and @
+            SQCHAR,     // the \' char
+            DQCHAR,     // the \" char
+            PERCENT,    // the % char
+            SLASH,      // the / char
+            STAR,       // the * char
+            OCURLY,     // the { char
+            CCURLY,     // the } char
+            END_FILE;   // the EOF char
+    // The DEFAULT transition is defined by the system and is used the same
+    // as the default clause in a C switch/case statement.  Any transition
+    // that has been defined is accepted.  A transition that is not defined
+    // is not accepted and produces a system error.
+
+    // Input function reads characters from the input and converts them
+    // into the transitions required by the state machine.
+    input read_trans;
+    // optional init and end functions
+    pre_code {{
+        index = 0;
+        memset(buffer, 0, sizeof(buffer));
+        buffer[index++] = '%';
+        buffer[index++] = '{';
+    }};
+    //pre_code init_copy;
+    //post_code end_scanner;
+
+    state START {
+        INVALID: ERROR invalid_char;
+        // note that this rule is bogus and designed to test the scanner
+        WHITE | NEWLINE: START {{
+            while(blart) {
+                nop();
+                if(ploo) {
+                    print_out("a floop of blart");
+                }
+            }
+        }};
+        ALPNUM: END Word;
+        PUNCT | STAR: SPECIAL copy_char;
+        SQCHAR: END Squote;
+        DQCHAR: END Dquote;
+        PERCENT: HAVEPERCENT copy_char;
+        SLASH: HAVESLASH copy_char;
+        OCURLY: HAVEOCURLY copy_char;
+        CCURLY: END copy_char;
+        END_FILE: END nop;
+    };
+
+    state SPECIAL {
+        INVALID: ERROR invalid_char;
+        WHITE | END_FILE: END nop;
+        PERCENT | PUNCT | STAR: SPECIAL copy_char;
+        DEFAULT: END pushback;
+    };
+
+    state HAVEPERCENT {
+        INVALID: ERROR invalid_char;
+        END_FILE | WHITE: END nop;
+        DEFAULT: END pushback;
+        PUNCT | PERCENT | STAR: SPECIAL copy_char;
+        OCURLY: END RawBlock;
+        CCURLY: ERROR unexpected_ccurly;
+    };
+
+    state HAVESLASH {
+        INVALID: ERROR invalid_char;
+        END_FILE | WHITE: END nop;
+        PERCENT | PUNCT: SPECIAL copy_char;
+        STAR: START Mline;
+        SLASH: START Sline;
+        DEFAULT: END pushback;
+    };
+
+    state HAVEOCURLY {
+        INVALID: ERROR invalid_char;
+        END_FILE | WHITE: END nop;
+        DEFAULT: END pushback;
+        OCURLY: END InlineBlock;
+    };
+
+    // The error and the end states are implemented internally.  Supplying
+    // a state definition called END or one called ERROR is a syntax error.
+
+};
+
+// The raw block state machine.  Must ignore the "%{" and "%}" when encountered
+// inside a comment or a string.
+machine RawBlock {
+
+    input read_trans;
+    pre_code {{
+        index = 0;
+        memset(buffer, 0, sizeof(buffer));
+        buffer[index++] = '%';
+        buffer[index++] = '{';
+    }};
+
+    states HAVEPERCENT, HAVESLASH, MLINE, SLINE, HAVESTAR, MQUOTE, SQUOTE;
+    trans   INVALID,    // an invalid character
+            WHITE,      // spaces tabs and line endings
+            ALPNUM,     // alphanumeric characters
+            NEWLINE,    // used to end a single line comment
+            PUNCT,      // characters such as #,$, and @
+            SQCHAR,     // the \' char
+            DQCHAR,     // the \" char
+            PERCENT,    // the % char
+            SLASH,      // the / char
+            STAR,       // the * char
+            OCURLY,     // the { char
+            CCURLY,     // the } char
+            END_FILE;   // the EOF char
+
+    state START {
+        PERCENT: HAVEPERCENT copy_char;
+        SLASH: HAVESLASH {{ copy_char(); }};
+        DEFAULT: START copy_char;
+        END_FILE: ERROR unexpected_eof;
+    };
+
+    state HAVEPERCENT {
+        CCURLY: END copy_char;
+        DEFAULT: START copy_char;
+        END_FILE: ERROR unexpected_eof;
+    };
+
+    state HAVESLASH {
+        SLASH: SLINE copy_char;
+        STAR: MLINE copy_char;
+        DEFAULT: START copy_char;
+        END_FILE: ERROR unexpected_eof;
+    }
+
+    state MLINE {
+        DEFAULT: MLINE copy_char;
+        STAR: HAVESTAR copy_char;
+        END_FILE: ERROR unexpected_eof;
+    }
+
+    state SLINE {
+        DEFAULT: SLINE copy_char;
+        NEWLINE: START copy_char;
+        END_FILE: ERROR unexpected_eof;
+    }
+
+    state HAVESTAR {
+        DEFAULT: MLINE copy_char;
+        SLASH: START copy_char;
+        END_FILE: ERROR unexpected_eof;
+    }
+
+    state MQUOTE {
+        DEFAULT: MQUOTE copy_char;
+        DQCHAR: START copy_char;
+        END_FILE: ERROR unexpected_eof;
+    }
+
+    state SQUOTE {
+        DEFAULT: SQUOTE copy_char;
+        SQCHAR: START copy_char;
+        END_FILE: ERROR unexpected_eof;
+    }
+};
+
+// This is a recursive sub-machine
+machine Block {
+    input read_trans;
+    pre_code init_block;
+
+    trans   INVALID,    // an invalid character
+            WHITE,      // spaces tabs and line endings
+            ALPNUM,     // alphanumeric characters
+            NEWLINE,    // used to end a single line comment
+            PUNCT,      // characters such as #,$, and @
+            SQCHAR,     // the \' char
+            DQCHAR,     // the \" char
+            PERCENT,    // the % char
+            SLASH,      // the / char
+            STAR,       // the * char
+            OCURLY,     // the { char
+            CCURLY,     // the } char
+            END_FILE;   // the EOF char
+
+    state START {
+        OCURLY: START Block;
+        CCURLY: END copy_char;
+        DEFAULT: START copy_char;
+        END_FILE: ERROR unexpected_eof;
+    };
+};
+
+machine InlineBlock {
+    input read_trans;
+    pre_code init_inlineblock;
+    states  HAVECCURLY;
+    trans   INVALID,    // an invalid character
+            WHITE,      // spaces tabs and line endings
+            ALPNUM,     // alphanumeric characters
+            NEWLINE,    // used to end a single line comment
+            PUNCT,      // characters such as #,$, and @
+            SQCHAR,     // the \' char
+            DQCHAR,     // the \" char
+            PERCENT,    // the % char
+            SLASH,      // the / char
+            STAR,       // the * char
+            OCURLY,     // the { char
+            CCURLY,     // the } char
+            END_FILE;   // the EOF char
+
+    state START {
+        OCURLY: START Block;
+        CCURLY: HAVECCURLY copy_char;
+        DEFAULT: START copy_char;
+        END_FILE: ERROR unexpected_eof;
+    };
+
+    state HAVECCURLY {
+        CCURLY: END copy_char;
+        DEFAULT: ERROR end_of_inline;
+        END_FILE: ERROR unexpected_eof;
+    };
+};
+
+machine MLine {
+    states HAVESTAR;
+    input read_trans;
+    post_code post_comment;
+
+    trans   INVALID,    // an invalid character
+            WHITE,      // spaces tabs and line endings
+            ALPNUM,     // alphanumeric characters
+            NEWLINE,    // used to end a single line comment
+            PUNCT,      // characters such as #,$, and @
+            SQCHAR,     // the \' char
+            DQCHAR,     // the \" char
+            PERCENT,    // the % char
+            SLASH,      // the / char
+            STAR,       // the * char
+            OCURLY,     // the { char
+            CCURLY,     // the } char
+            END_FILE;   // the EOF char
+
+    state START {
+        STAR: HAVESTAR nop;
+        DEFAULT: START nop;
+        END_FILE: ERROR unexpected_eof;
+    };
+
+    state HAVESTAR {
+        SLASH: END nop;
+        DEFAULT: START nop;
+        END_FILE: ERROR unexpected_eof;
+    };
+};
+
+machine Sline {
+    input read_trans;
+    post_code post_comment;
+
+    trans   INVALID,    // an invalid character
+            WHITE,      // spaces tabs and line endings
+            ALPNUM,     // alphanumeric characters
+            NEWLINE,    // used to end a single line comment
+            PUNCT,      // characters such as #,$, and @
+            SQCHAR,     // the \' char
+            DQCHAR,     // the \" char
+            PERCENT,    // the % char
+            SLASH,      // the / char
+            STAR,       // the * char
+            OCURLY,     // the { char
+            CCURLY,     // the } char
+            END_FILE;   // the EOF char
+
+    state START {
+        END_FILE | NEWLINE: END nop;
+        DEFAULT: START nop;
+    };
+};
+
+machine Dquote {
+    input read_trans;
+    pre_code init_copy;
+
+    trans   INVALID,    // an invalid character
+            WHITE,      // spaces tabs and line endings
+            ALPNUM,     // alphanumeric characters
+            NEWLINE,    // used to end a single line comment
+            PUNCT,      // characters such as #,$, and @
+            SQCHAR,     // the \' char
+            DQCHAR,     // the \" char
+            PERCENT,    // the % char
+            SLASH,      // the / char
+            STAR,       // the * char
+            OCURLY,     // the { char
+            CCURLY,     // the } char
+            END_FILE;   // the EOF char
+
+    state START {
+        END_FILE: ERROR unexpected_eof;
+        NEWLINE: ERROR unexpected_newline;
+        DQCHAR: END copy_char;
+        DEFAULT: START copy_char;
+    };
+};
+
+machine Squote {
+    input read_trans;
+    pre_code init_copy;
+
+    trans   INVALID,    // an invalid character
+            WHITE,      // spaces tabs and line endings
+            ALPNUM,     // alphanumeric characters
+            NEWLINE,    // used to end a single line comment
+            PUNCT,      // characters such as #,$, and @
+            SQCHAR,     // the \' char
+            DQCHAR,     // the \" char
+            PERCENT,    // the % char
+            SLASH,      // the / char
+            STAR,       // the * char
+            OCURLY,     // the { char
+            CCURLY,     // the } char
+            END_FILE;   // the EOF char
+
+    state START {
+        END_FILE: ERROR unexpected_eof;
+        NEWLINE: ERROR unexpected_newline;
+        SQCHAR: END copy_char;
+        DEFAULT: START copy_char;
+    };
+};
+
+machine Word {
+    input read_trans;
+    pre_code init_copy;
+
+    trans   INVALID,    // an invalid character
+            WHITE,      // spaces tabs and line endings
+            ALPNUM,     // alphanumeric characters
+            NEWLINE,    // used to end a single line comment
+            PUNCT,      // characters such as #,$, and @
+            SQCHAR,     // the \' char
+            DQCHAR,     // the \" char
+            PERCENT,    // the % char
+            SLASH,      // the / char
+            STAR,       // the * char
+            OCURLY,     // the { char
+            CCURLY,     // the } char
+            END_FILE;   // the EOF char
+
+    state START {
+        DEFAULT: END nop;
+        ALPNUM: START copy_char;
+    };
+};
+
+// END OF STATE MACHINE DEFINITIONS
+%{
+// START OF GLOBAL INTERFACE
+
+int init_scanner(void) {
+
+    int i;
+
+    for(i = 0; i < sizeof(char_table); i++)
+        char_table[i] = INVALID;
+
+    for(i = 0; stop[i] != 0; i++)
+        char_table[(int)stop[i]] = WHITE;      // AKA whitespace
+
+    for(i = 0; special[i] != 0; i++)
+        char_table[(int)special[i]] = PUNCT;   // not stoppers or words
+
+    for(i = 0; words[i] != 0; i++)
+        char_table[(int)words[i]] = ALPNUM;       // not stoppers or special
+
+    char_table['\"'] = DQCHAR;
+    char_table['\''] = SQCHAR;
+    char_table['%'] = PERCENT;
+    char_table['/'] = SLASH;
+    char_table['*'] = STAR;
+    char_table['{'] = OCURLY;
+    char_table['}'] = CCURLY;
+    char_table['\n'] = NEWLINE;
+    char_table[255] = END_FILE;
+
+    return 0;
+}
+
+void destroy_scanner(void) {
+    while(!files_close()) {/*empty*/;}
+}
+
+int scanner_open_file(char *name) {
+    return files_open(name);
+}
+
+int get_word(void) {
+    memset(buffer, 0, sizeof(buffer));
+    index = 0;
+    Scanner();  // this is the name of the primary state machine
+    return strlen(buffer);
+}
+
+// END OF GLOBAL INTERFACE
+%}
